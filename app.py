@@ -9,14 +9,11 @@ import streamlit as st
 RESOURCE_DIR = Path(__file__).parent / "resource"
 CHART_WIDTH = "stretch"
 DATE_PRESETS = ["전체", "최신 연도", "올해", "작년", "최근 12개월", "사용자 지정"]
-FILTER_MODE_ALL = "전체"
-FILTER_MODE_CUSTOM = "직접 선택"
-MULTISELECT_WIDGET_KEYS = [
+SELECTBOX_FILTER_ALL = "전체"
+SELECTBOX_FILTER_KEYS = [
     "filter_regions",
     "filter_sales_reps",
-    "filter_customer_names",
     "filter_customer_types",
-    "filter_quarters",
     "filter_product_groups",
     "filter_order_statuses",
     "filter_grades",
@@ -37,7 +34,6 @@ FILTER_STATE_KEYS = [
     "filter_sales_date",
     "filter_activity_date",
     "applied_filters",
-    *[f"{key}_mode" for key in MULTISELECT_WIDGET_KEYS],
 ]
 
 
@@ -194,46 +190,54 @@ def is_full_filter_selection(selected: list, all_options: list) -> bool:
     return bool(selected) and set(selected) == set(all_options)
 
 
-def set_all_multiselect_modes(mode: str = FILTER_MODE_ALL) -> None:
-    for key in MULTISELECT_WIDGET_KEYS:
-        st.session_state[f"{key}_mode"] = mode
+def selectbox_to_list(choice: str, options: list) -> list:
+    if choice == SELECTBOX_FILTER_ALL:
+        return list(options)
+    return [choice]
 
 
-def resolve_multiselect_from_mode(key: str, options: list) -> list:
-    mode = st.session_state.get(f"{key}_mode", FILTER_MODE_ALL)
-    if mode == FILTER_MODE_ALL:
-        return options
-    return st.session_state.get(key, [])
+def read_selectbox_filter(key: str, options: list) -> list:
+    choice = st.session_state.get(key, SELECTBOX_FILTER_ALL)
+    return selectbox_to_list(choice, options)
 
 
-def multiselect_filter_with_all(
+def selectbox_filter_all(
     label: str,
     options: list,
     key: str,
     container: st.delta_generator.DeltaGenerator | None = None,
-) -> list:
+) -> None:
     widget = container if container is not None else st
-    mode_key = f"{key}_mode"
-    if mode_key not in st.session_state:
-        st.session_state[mode_key] = FILTER_MODE_ALL
+    widget.selectbox(label, [SELECTBOX_FILTER_ALL, *options], key=key)
 
-    mode = widget.radio(
-        label,
-        [FILTER_MODE_ALL, FILTER_MODE_CUSTOM],
-        horizontal=True,
-        key=mode_key,
-    )
-    if mode == FILTER_MODE_ALL:
-        widget.caption(f"{label}: 전체 ({len(options)}개)")
-        return options
 
-    selected = widget.multiselect(
-        f"{label} 선택",
-        options,
-        default=options,
-        key=key,
+def multiselect_customers_filter(
+    label: str,
+    options: list,
+    key: str,
+    container: st.delta_generator.DeltaGenerator | None = None,
+) -> None:
+    widget = container if container is not None else st
+    selected = widget.multiselect(label, options, default=options, key=key)
+    widget.caption(
+        f"적용 후: {format_filter_selection(selected or options, options)}"
     )
-    return selected
+
+
+def ensure_filter_widget_defaults(
+    sales: pd.DataFrame,
+    customer: pd.DataFrame,
+) -> None:
+    for key in SELECTBOX_FILTER_KEYS:
+        st.session_state.setdefault(key, SELECTBOX_FILTER_ALL)
+    st.session_state.setdefault(
+        "filter_customer_names",
+        sorted(customer["거래처명"].unique()),
+    )
+    st.session_state.setdefault(
+        "filter_quarters",
+        sorted(sales["분기"].unique()),
+    )
 
 
 def resolve_date_range(preset: str, min_date: date, max_date: date) -> tuple[date, date]:
@@ -336,50 +340,34 @@ def collect_filters_from_widgets(
     all_grades = sorted(customer["등급"].unique())
 
     if manual_quarters:
-        quarter_selection = resolve_multiselect_from_mode("filter_quarters", all_quarters)
+        quarter_selection = st.session_state.get("filter_quarters", all_quarters)
     else:
         quarter_selection = effective_quarters
 
+    customer_names = st.session_state.get("filter_customer_names", all_customer_names)
     multiselect_values = {
-        "customer_names": resolve_multiselect_from_mode(
-            "filter_customer_names",
-            all_customer_names,
-        ),
+        "customer_names": customer_names,
         "quarters": quarter_selection if manual_quarters else effective_quarters,
-        "regions": resolve_multiselect_from_mode("filter_regions", all_regions),
-        "customer_types": resolve_multiselect_from_mode(
+        "regions": read_selectbox_filter("filter_regions", all_regions),
+        "customer_types": read_selectbox_filter(
             "filter_customer_types",
             all_customer_types,
         ),
-        "sales_reps": resolve_multiselect_from_mode("filter_sales_reps", all_sales_reps),
-        "product_groups": resolve_multiselect_from_mode(
+        "sales_reps": read_selectbox_filter("filter_sales_reps", all_sales_reps),
+        "product_groups": read_selectbox_filter(
             "filter_product_groups",
             all_product_groups,
         ),
-        "order_statuses": resolve_multiselect_from_mode(
+        "order_statuses": read_selectbox_filter(
             "filter_order_statuses",
             all_order_statuses,
         ),
-        "grades": resolve_multiselect_from_mode("filter_grades", all_grades),
+        "grades": read_selectbox_filter("filter_grades", all_grades),
     }
 
     invalid_selection = False
-    for widget_key, selected in [
-        ("filter_customer_names", multiselect_values["customer_names"]),
-        ("filter_regions", multiselect_values["regions"]),
-        ("filter_customer_types", multiselect_values["customer_types"]),
-        ("filter_sales_reps", multiselect_values["sales_reps"]),
-        ("filter_product_groups", multiselect_values["product_groups"]),
-        ("filter_order_statuses", multiselect_values["order_statuses"]),
-        ("filter_grades", multiselect_values["grades"]),
-    ]:
-        if (
-            st.session_state.get(f"{widget_key}_mode", FILTER_MODE_ALL)
-            == FILTER_MODE_CUSTOM
-            and not selected
-        ):
-            invalid_selection = True
-
+    if not multiselect_values["customer_names"]:
+        invalid_selection = True
     if manual_quarters and not multiselect_values["quarters"]:
         invalid_selection = True
 
@@ -414,23 +402,15 @@ def apply_quick_preset(
     st.session_state["filter_customer_search"] = defaults["customer_search"]
     st.session_state["filter_customer_names"] = defaults["customer_names"]
     st.session_state["filter_quarters"] = defaults["quarters"]
-    st.session_state["filter_regions"] = defaults["regions"]
-    st.session_state["filter_customer_types"] = defaults["customer_types"]
-    st.session_state["filter_sales_reps"] = defaults["sales_reps"]
-    st.session_state["filter_product_groups"] = defaults["product_groups"]
-    st.session_state["filter_order_statuses"] = defaults["order_statuses"]
-    st.session_state["filter_grades"] = defaults["grades"]
-    set_all_multiselect_modes(FILTER_MODE_ALL)
+    for key in SELECTBOX_FILTER_KEYS:
+        st.session_state[key] = SELECTBOX_FILTER_ALL
 
     if preset_name == "vip":
-        st.session_state["filter_grades_mode"] = FILTER_MODE_CUSTOM
-        st.session_state["filter_grades"] = ["VIP"]
+        st.session_state["filter_grades"] = "VIP"
     elif preset_name == "in_progress":
-        st.session_state["filter_order_statuses_mode"] = FILTER_MODE_CUSTOM
-        st.session_state["filter_order_statuses"] = ["진행중"]
+        st.session_state["filter_order_statuses"] = "진행중"
     elif preset_name == "seoul":
-        st.session_state["filter_regions_mode"] = FILTER_MODE_CUSTOM
-        st.session_state["filter_regions"] = ["서울"]
+        st.session_state["filter_regions"] = "서울"
 
     st.session_state["applied_filters"] = collect_filters_from_widgets(
         sales,
@@ -689,6 +669,25 @@ def format_active_filters(
     return "활성 필터: " + " | ".join(parts)
 
 
+def render_active_filter_display(
+    filters: dict,
+    sales: pd.DataFrame,
+    customer: pd.DataFrame,
+    activity: pd.DataFrame,
+) -> None:
+    summary = format_active_filters(filters, sales, customer, activity)
+    if summary.endswith("(모든 항목)"):
+        st.caption("**필터** · 전체 데이터")
+        return
+    chips = summary.replace("활성 필터: ", "").split(" | ")
+    chip_html = " ".join(
+        f'<span style="display:inline-block;padding:0.15rem 0.5rem;margin:0.1rem;'
+        f'background:#e8f4fc;border-radius:0.5rem;font-size:0.85rem;">{part}</span>'
+        for part in chips
+    )
+    st.markdown(f"**필터** {chip_html}", unsafe_allow_html=True)
+
+
 def build_filter_summary(
     filtered_sales: pd.DataFrame,
     filtered_customer: pd.DataFrame,
@@ -775,6 +774,7 @@ def render_sidebar_filters(
         st.session_state["filter_manual_quarters"] = False
     if "filter_customer_search" not in st.session_state:
         st.session_state["filter_customer_search"] = ""
+    ensure_filter_widget_defaults(sales, customer)
 
     with st.sidebar.form("filter_form"):
         preset = st.selectbox("기간 프리셋", DATE_PRESETS, key="date_preset")
@@ -791,38 +791,60 @@ def render_sidebar_filters(
             preview_range = resolve_date_range(preset, min_date, max_date)
             st.caption(f"적용 기간: {preview_range[0]} ~ {preview_range[1]}")
 
-        st.checkbox("매출(수주일)에 기간 적용", key="filter_sales_date")
-        st.checkbox("영업활동(활동일)에 기간 적용", key="filter_activity_date")
         st.text_input("거래처 검색", key="filter_customer_search", placeholder="이름 일부 입력")
 
-        multiselect_filter_with_all(
+        selectbox_filter_all(
             "지역",
             sorted(sales["지역"].unique()),
             "filter_regions",
         )
-        multiselect_filter_with_all(
+        selectbox_filter_all(
             "담당영업",
             sorted(sales["담당영업"].unique()),
             "filter_sales_reps",
         )
 
         with st.expander("상세 필터", expanded=False):
-            multiselect_filter_with_all(
+            st.checkbox("매출(수주일)에 기간 적용", key="filter_sales_date")
+            st.checkbox("영업활동(활동일)에 기간 적용", key="filter_activity_date")
+
+            multiselect_customers_filter(
                 "거래처",
                 sorted(customer["거래처명"].unique()),
                 "filter_customer_names",
             )
-            multiselect_filter_with_all(
+            selectbox_filter_all(
                 "거래처유형",
                 sorted(sales["거래처유형"].unique()),
                 "filter_customer_types",
             )
-            manual_quarters = st.checkbox("분기 직접 지정", key="filter_manual_quarters")
+            selectbox_filter_all(
+                "제품군",
+                sorted(sales["제품군"].unique()),
+                "filter_product_groups",
+            )
+            selectbox_filter_all(
+                "수주상태",
+                sorted(sales["수주상태"].unique()),
+                "filter_order_statuses",
+            )
+            selectbox_filter_all(
+                "거래처 등급",
+                sorted(customer["등급"].unique()),
+                "filter_grades",
+            )
+
+            manual_quarters = st.checkbox(
+                "분기 직접 지정 (고급)",
+                key="filter_manual_quarters",
+            )
+            all_quarters = sorted(sales["분기"].unique())
             if manual_quarters:
-                multiselect_filter_with_all(
+                st.multiselect(
                     "분기",
-                    sorted(sales["분기"].unique()),
-                    "filter_quarters",
+                    all_quarters,
+                    default=all_quarters,
+                    key="filter_quarters",
                 )
             else:
                 preview_preset = st.session_state.get("date_preset", "전체")
@@ -848,24 +870,9 @@ def render_sidebar_filters(
                 )
                 st.caption(
                     "분기: 기간 자동 ("
-                    f"{format_filter_selection(auto_quarters, sorted(sales['분기'].unique()))}"
+                    f"{format_filter_selection(auto_quarters, all_quarters)}"
                     ")"
                 )
-            multiselect_filter_with_all(
-                "제품군",
-                sorted(sales["제품군"].unique()),
-                "filter_product_groups",
-            )
-            multiselect_filter_with_all(
-                "수주상태",
-                sorted(sales["수주상태"].unique()),
-                "filter_order_statuses",
-            )
-            multiselect_filter_with_all(
-                "거래처 등급",
-                sorted(customer["등급"].unique()),
-                "filter_grades",
-            )
 
         submitted = st.form_submit_button("필터 적용", width="stretch")
         if submitted:
@@ -1322,19 +1329,18 @@ def main() -> None:
         filtered_activity,
         filters,
     )
-    active_filter_text = format_active_filters(filters, sales, customer, activity)
-    st.sidebar.markdown("**적용된 조건**")
-    for line in build_filter_condition_summary(
-        filters,
-        sales,
-        customer,
-        activity,
-    ):
-        st.sidebar.caption(f"· {line}")
+    with st.sidebar.expander("적용된 조건", expanded=False):
+        for line in build_filter_condition_summary(
+            filters,
+            sales,
+            customer,
+            activity,
+        ):
+            st.caption(f"· {line}")
     st.sidebar.markdown("**적용 결과**")
     st.sidebar.write(summary_text)
 
-    st.info(active_filter_text)
+    render_active_filter_display(filters, sales, customer, activity)
     if has_conflict:
         st.warning("기간과 분기 조건이 겹치지 않습니다.")
 
