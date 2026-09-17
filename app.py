@@ -32,8 +32,86 @@ def format_currency(value: float) -> str:
     return f"₩{value:,.0f}"
 
 
+def format_currency_kpi(value: float) -> str:
+    sign = "-" if value < 0 else ""
+    abs_value = abs(value)
+    if abs_value >= 100_000_000:
+        return f"{sign}₩{abs_value / 100_000_000:.1f}억"
+    if abs_value >= 10_000:
+        return f"{sign}₩{abs_value / 10_000:,.0f}만"
+    return format_currency(value)
+
+
+def format_currency_help(value: float) -> str:
+    return f"전체 금액: {format_currency(value)}"
+
+
+def format_delta_currency(value: float) -> str:
+    abs_value = abs(value)
+    if abs_value >= 100_000_000:
+        return f"{value / 100_000_000:.1f}억"
+    if abs_value >= 10_000:
+        return f"{value / 10_000:,.0f}만"
+    return f"{value:,.0f}원"
+
+
 def format_percent(value: float) -> str:
     return f"{value:.1f}%"
+
+
+def render_metric_kpi(
+    container: st.delta_generator.DeltaGenerator,
+    label: str,
+    value: float | int,
+    *,
+    is_currency: bool = False,
+    delta: str | None = None,
+    suffix: str = "",
+    help_text: str | None = None,
+) -> None:
+    if is_currency:
+        numeric_value = float(value)
+        container.metric(
+            label,
+            format_currency_kpi(numeric_value),
+            delta=delta,
+            help=help_text or format_currency_help(numeric_value),
+        )
+        return
+
+    if suffix:
+        display_value = f"{int(value):,}{suffix}"
+    else:
+        display_value = str(value)
+
+    container.metric(label, display_value, delta=delta, help=help_text)
+
+
+def inject_readability_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stMetricLabel"] {
+            font-size: 0.95rem;
+        }
+        [data-testid="stMetricValue"] {
+            line-height: 1.2;
+            word-break: keep-all;
+            white-space: nowrap;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_chart_style(fig) -> None:
+    fig.update_layout(title_font=dict(size=15))
+
+
+def display_plotly_chart(fig, key: str) -> None:
+    apply_chart_style(fig)
+    st.plotly_chart(fig, width=CHART_WIDTH, key=key)
 
 
 def empty_frames(
@@ -45,6 +123,7 @@ def empty_frames(
 
 
 def apply_money_chart_format(fig, money_cols: list[str] | None = None) -> None:
+    apply_chart_style(fig)
     fig.update_layout(hovermode="x unified")
     if money_cols:
         for col in money_cols:
@@ -548,7 +627,7 @@ def render_sidebar_filters(
             )
         else:
             preview_range = resolve_date_range(preset, min_date, max_date)
-            st.info(f"적용 기간: {preview_range[0]} ~ {preview_range[1]}")
+            st.caption(f"적용 기간: {preview_range[0]} ~ {preview_range[1]}")
 
         st.checkbox("매출(수주일)에 기간 적용", key="filter_sales_date")
         st.checkbox("영업활동(활동일)에 기간 적용", key="filter_activity_date")
@@ -635,13 +714,15 @@ def render_overview_tab(
     )
     order_count = len(sales)
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("총 매출금액", format_currency(total_revenue))
-    c2.metric("미수금 합계", format_currency(total_receivable))
-    c3.metric("거래 건수", f"{order_count:,}건")
-    c4.metric("활동 건수", f"{activity_count:,}건")
-    c5.metric("긍정 비율", format_percent(positive_rate))
-    c6.metric("VIP 거래처", f"{vip_count:,}개")
+    row1_c1, row1_c2, row1_c3 = st.columns(3)
+    render_metric_kpi(row1_c1, "총 매출금액", total_revenue, is_currency=True)
+    render_metric_kpi(row1_c2, "미수금 합계", total_receivable, is_currency=True)
+    render_metric_kpi(row1_c3, "거래 건수", order_count, suffix="건")
+
+    row2_c1, row2_c2, row2_c3 = st.columns(3)
+    render_metric_kpi(row2_c1, "활동 건수", activity_count, suffix="건")
+    row2_c2.metric("긍정 비율", format_percent(positive_rate))
+    render_metric_kpi(row2_c3, "VIP 거래처", vip_count, suffix="개")
 
     col1, col2 = st.columns(2)
 
@@ -660,7 +741,7 @@ def render_overview_tab(
                 labels={"매출금액": "매출금액 (원)"},
             )
             apply_money_chart_format(fig_quarter)
-            st.plotly_chart(fig_quarter, width=CHART_WIDTH, key="overview_quarter_chart")
+            display_plotly_chart(fig_quarter, "overview_quarter_chart")
         else:
             st.info("매출 데이터가 없습니다.")
 
@@ -674,7 +755,7 @@ def render_overview_tab(
                 values="건수",
                 title="활동결과 분포",
             )
-            st.plotly_chart(fig_outcome, width=CHART_WIDTH, key="overview_outcome_chart")
+            display_plotly_chart(fig_outcome, "overview_outcome_chart")
         else:
             st.info("영업활동 데이터가 없습니다.")
 
@@ -706,16 +787,26 @@ def render_sales_tab(
     revenue_delta = total_revenue - prior_revenue
     count_delta = order_count - prior_count
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("총 수주금액", format_currency(total_order))
-    c2.metric(
+    row1_c1, row1_c2, row1_c3 = st.columns(3)
+    render_metric_kpi(row1_c1, "총 수주금액", total_order, is_currency=True)
+    render_metric_kpi(
+        row1_c2,
         "총 매출금액",
-        format_currency(total_revenue),
-        delta=f"{revenue_delta:,.0f}원",
+        total_revenue,
+        is_currency=True,
+        delta=format_delta_currency(revenue_delta),
     )
-    c3.metric("거래 건수", f"{order_count:,}건", delta=f"{count_delta:,}건")
-    c4.metric("평균 수주금액", format_currency(avg_order))
-    c5.metric("미수금 합계", format_currency(total_receivable))
+    render_metric_kpi(
+        row1_c3,
+        "거래 건수",
+        order_count,
+        suffix="건",
+        delta=f"{count_delta:,}건",
+    )
+
+    row2_c1, row2_c2 = st.columns(2)
+    render_metric_kpi(row2_c1, "평균 수주금액", avg_order, is_currency=True)
+    render_metric_kpi(row2_c2, "미수금 합계", total_receivable, is_currency=True)
 
     st.caption(
         f"취소율: {format_percent(cancel_rate)} | "
@@ -738,7 +829,7 @@ def render_sales_tab(
             labels={"매출금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_quarter)
-        st.plotly_chart(fig_quarter, width=CHART_WIDTH, key="sales_quarter_chart")
+        display_plotly_chart(fig_quarter, "sales_quarter_chart")
 
         product_df = sales.groupby("제품군", as_index=False)["매출금액"].sum()
         fig_product = px.pie(
@@ -747,7 +838,7 @@ def render_sales_tab(
             values="매출금액",
             title="제품군별 매출",
         )
-        st.plotly_chart(fig_product, width=CHART_WIDTH, key="sales_product_chart")
+        display_plotly_chart(fig_product, "sales_product_chart")
 
     with col2:
         region_df = (
@@ -764,7 +855,7 @@ def render_sales_tab(
             labels={"매출금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_region)
-        st.plotly_chart(fig_region, width=CHART_WIDTH, key="sales_region_chart")
+        display_plotly_chart(fig_region, "sales_region_chart")
 
         rep_df = sales.groupby("담당영업", as_index=False)["매출금액"].sum()
         fig_rep = px.bar(
@@ -775,7 +866,7 @@ def render_sales_tab(
             labels={"매출금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_rep)
-        st.plotly_chart(fig_rep, width=CHART_WIDTH, key="sales_rep_chart")
+        display_plotly_chart(fig_rep, "sales_rep_chart")
 
     status_df = (
         sales.groupby("수주상태", as_index=False)
@@ -789,7 +880,7 @@ def render_sales_tab(
             y="건수",
             title="수주상태별 건수",
         )
-        st.plotly_chart(fig_status_count, width=CHART_WIDTH, key="sales_status_count_chart")
+        display_plotly_chart(fig_status_count, "sales_status_count_chart")
     with status_col2:
         fig_status_amount = px.bar(
             status_df,
@@ -799,7 +890,7 @@ def render_sales_tab(
             labels={"금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_status_amount)
-        st.plotly_chart(fig_status_amount, width=CHART_WIDTH, key="sales_status_amount_chart")
+        display_plotly_chart(fig_status_amount, "sales_status_amount_chart")
 
     export_sales = sales.copy()
     export_sales["수주일"] = export_sales["수주일"].dt.strftime("%Y-%m-%d")
@@ -825,12 +916,14 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
     period_revenue = sales["매출금액"].sum() if not sales.empty else 0
     period_orders = len(sales)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("활성 거래처 수", f"{active_customers:,}개")
-    c2.metric("기간 매출", format_currency(period_revenue))
-    c3.metric("기간 거래 건수", f"{period_orders:,}건")
-    c4.metric("평균 누적매출", format_currency(avg_cumulative))
-    c5.metric("VIP 비율", format_percent(grade_counts.get("VIP", 0)))
+    row1_c1, row1_c2, row1_c3 = st.columns(3)
+    render_metric_kpi(row1_c1, "활성 거래처 수", active_customers, suffix="개")
+    render_metric_kpi(row1_c2, "기간 매출", period_revenue, is_currency=True)
+    render_metric_kpi(row1_c3, "기간 거래 건수", period_orders, suffix="건")
+
+    row2_c1, row2_c2 = st.columns(2)
+    render_metric_kpi(row2_c1, "평균 누적매출", avg_cumulative, is_currency=True)
+    row2_c2.metric("VIP 비율", format_percent(grade_counts.get("VIP", 0)))
 
     grade_ratio_text = " / ".join(
         f"{grade} {format_percent(ratio)}"
@@ -859,7 +952,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             y="거래처 수",
             title="거래처유형별 분포",
         )
-        st.plotly_chart(fig_type, width=CHART_WIDTH, key="customer_type_chart")
+        display_plotly_chart(fig_type, "customer_type_chart")
 
         region_df = customer["지역"].value_counts().reset_index()
         region_df.columns = ["지역", "거래처 수"]
@@ -869,7 +962,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             y="거래처 수",
             title="지역별 거래처 수",
         )
-        st.plotly_chart(fig_region, width=CHART_WIDTH, key="customer_region_chart")
+        display_plotly_chart(fig_region, "customer_region_chart")
 
     with col2:
         grade_df = customer.groupby("등급", as_index=False)["누적매출"].sum()
@@ -881,7 +974,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             labels={"누적매출": "누적매출 (원)"},
         )
         apply_money_chart_format(fig_grade)
-        st.plotly_chart(fig_grade, width=CHART_WIDTH, key="customer_grade_chart")
+        display_plotly_chart(fig_grade, "customer_grade_chart")
 
         if rank_mode == "누적매출(마스터)":
             top10 = customer.nlargest(10, "누적매출")
@@ -914,7 +1007,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             )
             apply_money_chart_format(fig_top)
             fig_top.update_layout(yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(fig_top, width=CHART_WIDTH, key="customer_top10_chart")
+            display_plotly_chart(fig_top, "customer_top10_chart")
 
     export_customer = customer.copy()
     export_customer["첫거래일"] = export_customer["첫거래일"].dt.strftime("%Y-%m-%d")
@@ -963,7 +1056,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
             title="월별 활동 추이",
             markers=True,
         )
-        st.plotly_chart(fig_monthly, width=CHART_WIDTH, key="activity_monthly_chart")
+        display_plotly_chart(fig_monthly, "activity_monthly_chart")
 
         type_df = activity["활동유형"].value_counts().reset_index()
         type_df.columns = ["활동유형", "건수"]
@@ -973,7 +1066,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
             y="건수",
             title="활동유형별 건수",
         )
-        st.plotly_chart(fig_type, width=CHART_WIDTH, key="activity_type_chart")
+        display_plotly_chart(fig_type, "activity_type_chart")
 
     with col2:
         outcome_df = activity["활동결과"].value_counts().reset_index()
@@ -984,7 +1077,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
             values="건수",
             title="활동결과 분포",
         )
-        st.plotly_chart(fig_outcome, width=CHART_WIDTH, key="activity_outcome_chart")
+        display_plotly_chart(fig_outcome, "activity_outcome_chart")
 
         rep_df = activity.groupby("담당영업").agg(
             총활동=("활동ID", "count"),
@@ -1000,7 +1093,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
                 y="총활동",
                 title="담당영업별 활동 건수",
             )
-            st.plotly_chart(fig_rep_count, width=CHART_WIDTH, key="activity_rep_count_chart")
+            display_plotly_chart(fig_rep_count, "activity_rep_count_chart")
         with rep_col2:
             fig_rep_rate = px.bar(
                 rep_df,
@@ -1008,7 +1101,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
                 y="긍정률",
                 title="담당영업별 긍정률 (%)",
             )
-            st.plotly_chart(fig_rep_rate, width=CHART_WIDTH, key="activity_rep_rate_chart")
+            display_plotly_chart(fig_rep_rate, "activity_rep_rate_chart")
 
     export_activity = activity.copy()
     export_activity["활동일"] = export_activity["활동일"].dt.strftime("%Y-%m-%d")
@@ -1020,6 +1113,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="에이텍 CRM 영업 대시보드", layout="wide")
+    inject_readability_styles()
     st.title("에이텍 CRM 영업 대시보드")
 
     sales, customer, activity = load_data()
@@ -1043,7 +1137,7 @@ def main() -> None:
     st.sidebar.markdown("**적용 결과**")
     st.sidebar.write(summary_text)
 
-    st.caption(active_filter_text)
+    st.info(active_filter_text)
     if has_conflict:
         st.warning("기간과 분기 조건이 겹치지 않습니다.")
 
