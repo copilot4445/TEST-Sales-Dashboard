@@ -479,7 +479,12 @@ def compute_prior_period_sales(
     return prior_sales["매출금액"].sum(), len(prior_sales)
 
 
-def download_csv_button(df: pd.DataFrame, filename: str, label: str = "CSV 다운로드") -> None:
+def download_csv_button(
+    df: pd.DataFrame,
+    filename: str,
+    label: str = "CSV 다운로드",
+    key: str | None = None,
+) -> None:
     buffer = BytesIO()
     df.to_csv(buffer, index=False, encoding="utf-8-sig")
     st.download_button(
@@ -487,6 +492,7 @@ def download_csv_button(df: pd.DataFrame, filename: str, label: str = "CSV 다�
         data=buffer.getvalue(),
         file_name=filename,
         mime="text/csv",
+        key=key,
     )
 
 
@@ -654,7 +660,7 @@ def render_overview_tab(
                 labels={"매출금액": "매출금액 (원)"},
             )
             apply_money_chart_format(fig_quarter)
-            st.plotly_chart(fig_quarter, width=CHART_WIDTH)
+            st.plotly_chart(fig_quarter, width=CHART_WIDTH, key="overview_quarter_chart")
         else:
             st.info("매출 데이터가 없습니다.")
 
@@ -668,7 +674,7 @@ def render_overview_tab(
                 values="건수",
                 title="활동결과 분포",
             )
-            st.plotly_chart(fig_outcome, width=CHART_WIDTH)
+            st.plotly_chart(fig_outcome, width=CHART_WIDTH, key="overview_outcome_chart")
         else:
             st.info("영업활동 데이터가 없습니다.")
 
@@ -732,7 +738,7 @@ def render_sales_tab(
             labels={"매출금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_quarter)
-        st.plotly_chart(fig_quarter, width=CHART_WIDTH)
+        st.plotly_chart(fig_quarter, width=CHART_WIDTH, key="sales_quarter_chart")
 
         product_df = sales.groupby("제품군", as_index=False)["매출금액"].sum()
         fig_product = px.pie(
@@ -741,7 +747,7 @@ def render_sales_tab(
             values="매출금액",
             title="제품군별 매출",
         )
-        st.plotly_chart(fig_product, width=CHART_WIDTH)
+        st.plotly_chart(fig_product, width=CHART_WIDTH, key="sales_product_chart")
 
     with col2:
         region_df = (
@@ -758,7 +764,7 @@ def render_sales_tab(
             labels={"매출금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_region)
-        st.plotly_chart(fig_region, width=CHART_WIDTH)
+        st.plotly_chart(fig_region, width=CHART_WIDTH, key="sales_region_chart")
 
         rep_df = sales.groupby("담당영업", as_index=False)["매출금액"].sum()
         fig_rep = px.bar(
@@ -769,7 +775,7 @@ def render_sales_tab(
             labels={"매출금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_rep)
-        st.plotly_chart(fig_rep, width=CHART_WIDTH)
+        st.plotly_chart(fig_rep, width=CHART_WIDTH, key="sales_rep_chart")
 
     status_df = (
         sales.groupby("수주상태", as_index=False)
@@ -783,7 +789,7 @@ def render_sales_tab(
             y="건수",
             title="수주상태별 건수",
         )
-        st.plotly_chart(fig_status_count, width=CHART_WIDTH)
+        st.plotly_chart(fig_status_count, width=CHART_WIDTH, key="sales_status_count_chart")
     with status_col2:
         fig_status_amount = px.bar(
             status_df,
@@ -793,7 +799,7 @@ def render_sales_tab(
             labels={"금액": "매출금액 (원)"},
         )
         apply_money_chart_format(fig_status_amount)
-        st.plotly_chart(fig_status_amount, width=CHART_WIDTH)
+        st.plotly_chart(fig_status_amount, width=CHART_WIDTH, key="sales_status_amount_chart")
 
     export_sales = sales.copy()
     export_sales["수주일"] = export_sales["수주일"].dt.strftime("%Y-%m-%d")
@@ -804,8 +810,8 @@ def render_sales_tab(
         display_sales[col] = display_sales[col].apply(format_currency)
 
     st.subheader("거래 상세")
-    download_csv_button(export_sales, "sales_filtered.csv")
-    st.dataframe(display_sales, width=CHART_WIDTH, hide_index=True)
+    download_csv_button(export_sales, "sales_filtered.csv", key="download_sales_csv")
+    st.dataframe(display_sales, width=CHART_WIDTH, hide_index=True, key="sales_detail_table")
 
 
 def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
@@ -839,6 +845,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
         "Top 10 기준",
         ["누적매출(마스터)", "기간 매출(필터)"],
         horizontal=True,
+        key="customer_top10_mode",
     )
 
     col1, col2 = st.columns(2)
@@ -852,7 +859,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             y="거래처 수",
             title="거래처유형별 분포",
         )
-        st.plotly_chart(fig_type, width=CHART_WIDTH)
+        st.plotly_chart(fig_type, width=CHART_WIDTH, key="customer_type_chart")
 
         region_df = customer["지역"].value_counts().reset_index()
         region_df.columns = ["지역", "거래처 수"]
@@ -862,7 +869,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             y="거래처 수",
             title="지역별 거래처 수",
         )
-        st.plotly_chart(fig_region, width=CHART_WIDTH)
+        st.plotly_chart(fig_region, width=CHART_WIDTH, key="customer_region_chart")
 
     with col2:
         grade_df = customer.groupby("등급", as_index=False)["누적매출"].sum()
@@ -874,7 +881,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             labels={"누적매출": "누적매출 (원)"},
         )
         apply_money_chart_format(fig_grade)
-        st.plotly_chart(fig_grade, width=CHART_WIDTH)
+        st.plotly_chart(fig_grade, width=CHART_WIDTH, key="customer_grade_chart")
 
         if rank_mode == "누적매출(마스터)":
             top10 = customer.nlargest(10, "누적매출")
@@ -907,7 +914,7 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
             )
             apply_money_chart_format(fig_top)
             fig_top.update_layout(yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(fig_top, width=CHART_WIDTH)
+            st.plotly_chart(fig_top, width=CHART_WIDTH, key="customer_top10_chart")
 
     export_customer = customer.copy()
     export_customer["첫거래일"] = export_customer["첫거래일"].dt.strftime("%Y-%m-%d")
@@ -916,8 +923,8 @@ def render_customer_tab(customer: pd.DataFrame, sales: pd.DataFrame) -> None:
     display_customer["누적매출"] = display_customer["누적매출"].apply(format_currency)
 
     st.subheader("거래처 마스터")
-    download_csv_button(export_customer, "customers_filtered.csv")
-    st.dataframe(display_customer, width=CHART_WIDTH, hide_index=True)
+    download_csv_button(export_customer, "customers_filtered.csv", key="download_customer_csv")
+    st.dataframe(display_customer, width=CHART_WIDTH, hide_index=True, key="customer_detail_table")
 
 
 def render_activity_tab(activity: pd.DataFrame) -> None:
@@ -956,7 +963,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
             title="월별 활동 추이",
             markers=True,
         )
-        st.plotly_chart(fig_monthly, width=CHART_WIDTH)
+        st.plotly_chart(fig_monthly, width=CHART_WIDTH, key="activity_monthly_chart")
 
         type_df = activity["활동유형"].value_counts().reset_index()
         type_df.columns = ["활동유형", "건수"]
@@ -966,7 +973,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
             y="건수",
             title="활동유형별 건수",
         )
-        st.plotly_chart(fig_type, width=CHART_WIDTH)
+        st.plotly_chart(fig_type, width=CHART_WIDTH, key="activity_type_chart")
 
     with col2:
         outcome_df = activity["활동결과"].value_counts().reset_index()
@@ -977,7 +984,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
             values="건수",
             title="활동결과 분포",
         )
-        st.plotly_chart(fig_outcome, width=CHART_WIDTH)
+        st.plotly_chart(fig_outcome, width=CHART_WIDTH, key="activity_outcome_chart")
 
         rep_df = activity.groupby("담당영업").agg(
             총활동=("활동ID", "count"),
@@ -993,7 +1000,7 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
                 y="총활동",
                 title="담당영업별 활동 건수",
             )
-            st.plotly_chart(fig_rep_count, width=CHART_WIDTH)
+            st.plotly_chart(fig_rep_count, width=CHART_WIDTH, key="activity_rep_count_chart")
         with rep_col2:
             fig_rep_rate = px.bar(
                 rep_df,
@@ -1001,14 +1008,14 @@ def render_activity_tab(activity: pd.DataFrame) -> None:
                 y="긍정률",
                 title="담당영업별 긍정률 (%)",
             )
-            st.plotly_chart(fig_rep_rate, width=CHART_WIDTH)
+            st.plotly_chart(fig_rep_rate, width=CHART_WIDTH, key="activity_rep_rate_chart")
 
     export_activity = activity.copy()
     export_activity["활동일"] = export_activity["활동일"].dt.strftime("%Y-%m-%d")
 
     st.subheader("영업활동 상세")
-    download_csv_button(export_activity, "activities_filtered.csv")
-    st.dataframe(export_activity, width=CHART_WIDTH, hide_index=True)
+    download_csv_button(export_activity, "activities_filtered.csv", key="download_activity_csv")
+    st.dataframe(export_activity, width=CHART_WIDTH, hide_index=True, key="activity_detail_table")
 
 
 def main() -> None:
